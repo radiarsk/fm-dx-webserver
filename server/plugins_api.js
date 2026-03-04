@@ -12,6 +12,8 @@ let wss = null;
 let pluginsWss = null;
 let httpServer = null;
 let serverConfig = null;
+let wsAuthHook = null;
+let httpAuthHook = null;
 
 // ---- internal plugin event bus ----
 
@@ -113,6 +115,24 @@ function offPluginEvent(event, handler) {
     pluginEvents.off(event, handler);
 }
 
+// ---- auth hooks (registered by auth plugins) ----
+
+function registerWsAuthHook(fn) {
+    wsAuthHook = fn;
+}
+
+function registerHttpAuthHook(fn) {
+    httpAuthHook = fn;
+}
+
+function getWsAuthHook() {
+    return wsAuthHook;
+}
+
+function getHttpAuthHook() {
+    return httpAuthHook;
+}
+
 // ---- exports ----
 
 module.exports = {
@@ -133,5 +153,11 @@ module.exports = {
     // inter-plugin hooks
     emitPluginEvent,
     onPluginEvent,
-    offPluginEvent
+    offPluginEvent,
+
+    // auth hooks
+    registerWsAuthHook,
+    registerHttpAuthHook,
+    getWsAuthHook,
+    getHttpAuthHook,
 };

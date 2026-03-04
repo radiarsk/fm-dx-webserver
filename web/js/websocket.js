@@ -25,5 +25,15 @@ if (!window.socket || window.socket.readyState === WebSocket.CLOSED || window.so
         });
     });
 
+    // Early capture of sessionId before main.js finishes loading
+    socket.addEventListener('message', (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            if (data.sessionId) {
+                window.sessionId = data.sessionId;
+            }
+        } catch (e) {}
+    });
+
     window.socketPromise = socketPromise;
 }

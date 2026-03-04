@@ -369,6 +369,10 @@ setInterval(() => {
 }, 60 * 60 * 1000); // Run every hour
 
 wss.on('connection', (ws, request) => {
+    // Auth already resolved in the upgrade handler — just pick up the result
+    ws._clientInfo = request._wsClientInfo || null;
+    ws._cookieHeader = request.headers['cookie'] || '';
+
     const output = serverConfig.xdrd.wirelessConnection ? client : serialport;
     let clientIp = request.headers['x-forwarded-for'] || request.connection.remoteAddress;
     const userCommandHistory = {};
@@ -418,18 +422,25 @@ wss.on('connection', (ws, request) => {
 
     if (timeoutAntenna) clearTimeout(timeoutAntenna);
 
-    helpers.handleConnect(clientIp, currentUsers, ws, (result) => {
+    const sessionId = require('crypto').randomUUID();
+    const clientInfo = ws._clientInfo || { name: '' };
+    delete ws._clientInfo;
+
+    ws.send(JSON.stringify({ sessionId }));
+    ws.send(JSON.stringify(dataHandler.dataToSend));
+
+    helpers.handleConnect(clientInfo, clientIp, currentUsers, ws, (result) => {
       if (result === "User banned") {
           ws.close(1008, 'Banned IP');
           return;
       }
 
-    dataHandler.showOnlineUsers(currentUsers);
+    dataHandler.showOnlineUsers(currentUsers, wss);
 
     if (currentUsers === 1 && serverConfig.autoShutdown === true && serverConfig.xdrd.wirelessConnection) {
         serverConfig.xdrd.wirelessConnection ? connectToXdrd() : serialport.write('x\n');
     }
-  });  
+  }, request, sessionId);
 
     const userCommands = {};
     let lastWarn = { time: 0 };
@@ -506,15 +517,15 @@ wss.on('connection', (ws, request) => {
       if (clientIp !== '::ffff:127.0.0.1' || (request.connection && request.connection.remoteAddress && request.connection.remoteAddress !== '::ffff:127.0.0.1') || (request.headers && request.headers['origin'] && request.headers['origin'].trim() !== '')) {
         currentUsers--;
       }
-        dataHandler.showOnlineUsers(currentUsers);
-
-        const index = storage.connectedUsers.findIndex(user => user.ip === clientIp);
+        const index = storage.connectedUsers.findIndex(user => user.instance === ws);
         if (index !== -1) {
             storage.connectedUsers.splice(index, 1);
         }
 
+        dataHandler.showOnlineUsers(currentUsers, wss);
+
         if (currentUsers === 0) {
-            storage.connectedUsers = [];
+            storage.connectedUsers.length = 0;
 
             if (serverConfig.bwAutoNoUsers === "1") {
                 output.write("W0\n"); // Auto BW 'Enabled'
@@ -656,13 +667,25 @@ function isPortOpen(host, port, timeout = 1000) {
     });
 }
 
-// Websocket register for /text, /audio and /chat paths 
-httpServer.on('upgrade', (request, socket, head) => {
-  
+// Websocket register for /text, /audio and /chat paths
+httpServer.on('upgrade', async (request, socket, head) => {
+
   const clientIp = request.headers['x-forwarded-for'] || request.connection.remoteAddress;
   if (serverConfig.webserver.banlist?.includes(clientIp)) {
     socket.destroy();
     return;
+  }
+
+  // Centralized WS auth — protects all WS paths at once
+  const wsHook = pluginsApi.getWsAuthHook();
+  if (wsHook) {
+    const clientInfo = await wsHook(request);
+    if (clientInfo === null) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    request._wsClientInfo = clientInfo;
   }
 
   if (request.url === '/text') {
@@ -671,10 +694,23 @@ httpServer.on('upgrade', (request, socket, head) => {
         wss.emit('connection', ws, request);
       });
     });
-  } else if (request.url === '/audio') {
+  } else if (request.url.startsWith('/audio')) {
     if (typeof audioServer?.handleAudioUpgrade === 'function') {
       audioServer.handleAudioUpgrade(request, socket, head, (ws) => {
         audioServer.Server?.Server?.emit?.('connection', ws, request);
+
+        const url = new URL(request.url, `http://${request.headers.host}`);
+        const sessionId = url.searchParams.get('sessionId');
+        const audioClientIp = request.headers['x-forwarded-for'] || request.connection.remoteAddress;
+
+        if (sessionId) {
+            helpers.setListeningStatus(sessionId, true, audioClientIp);
+            dataHandler.showOnlineUsers(currentUsers, wss);
+            ws.on('close', () => {
+                helpers.setListeningStatus(sessionId, false, audioClientIp);
+                dataHandler.showOnlineUsers(currentUsers, wss);
+            });
+        }
       });
     } else {
       logWarn('[Audio WebSocket] Audio server not ready — dropping client connection.');

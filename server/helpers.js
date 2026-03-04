@@ -59,10 +59,9 @@ function authenticateWithXdrd(client, salt, password) {
 
 const ipCache = new Map();
 
-function handleConnect(clientIp, currentUsers, ws, callback) {
+function handleConnect(clientInfo, clientIp, currentUsers, ws, callback, request, sessionId) {
   if (ipCache.has(clientIp)) {
-    // Use cached location info
-    processConnection(clientIp, ipCache.get(clientIp), currentUsers, ws, callback);
+    processConnection(clientInfo, clientIp, ipCache.get(clientIp), currentUsers, ws, callback, request, sessionId);
     return;
   }
 
@@ -76,8 +75,8 @@ function handleConnect(clientIp, currentUsers, ws, callback) {
     response.on("end", () => {
       try {
         const locationInfo = JSON.parse(data);
-        ipCache.set(clientIp, locationInfo); // Store in cache
-        processConnection(clientIp, locationInfo, currentUsers, ws, callback);
+        ipCache.set(clientIp, locationInfo);
+        processConnection(clientInfo, clientIp, locationInfo, currentUsers, ws, callback, request, sessionId);
       } catch (error) {
         console.error("Error parsing location data:", error);
         callback("User allowed");
@@ -131,7 +130,7 @@ function fetchBannedAS(callback) {
 
 const recentBannedIps = new Map(); // Store clientIp -> timestamp
 
-function processConnection(clientIp, locationInfo, currentUsers, ws, callback) {
+function processConnection(clientInfo, clientIp, locationInfo, currentUsers, ws, callback, request, sessionId) {
   const options = { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" };
   const connectionTime = new Date().toLocaleString([], options);
   const normalizedClientIp = clientIp?.replace(/^::ffff:/, '');
@@ -153,12 +152,30 @@ function processConnection(clientIp, locationInfo, currentUsers, ws, callback) {
       return callback("User banned");
     }
 
-    const userLocation =
-      locationInfo.country === undefined
-        ? "Unknown"
-        : `${locationInfo.city}, ${locationInfo.regionName}, ${locationInfo.countryCode}`;
+    const userCountry = locationInfo.country === undefined ? '' : locationInfo.countryCode;
+    const userLocation = locationInfo.country === undefined
+      ? "Unknown"
+      : `${locationInfo.city}, ${locationInfo.regionName}, ${locationInfo.countryCode}`;
+
+    const userName = (clientInfo && clientInfo.name) ? clientInfo.name : 'Guest';
+
+    // Clean stale entries; preserve listening for reconnecting user
+    let inheritListening = false;
+    for (let i = storage.connectedUsers.length - 1; i >= 0; i--) {
+      const existing = storage.connectedUsers[i];
+      if (existing.instance.readyState > 1) {
+        if (existing.name === userName && existing.ip === clientIp && existing.listening) {
+          inheritListening = true;
+        }
+        storage.connectedUsers.splice(i, 1);
+      }
+    }
 
     storage.connectedUsers.push({
+      name: userName,
+      countryCode: userCountry,
+      listening: inheritListening,
+      sessionId: sessionId,
       ip: clientIp,
       location: userLocation,
       time: connectionTime,
@@ -171,6 +188,32 @@ function processConnection(clientIp, locationInfo, currentUsers, ws, callback) {
 
     callback("User allowed");
   });
+}
+
+function setListeningStatus(sessionId, listening, clientIp) {
+  // Normalize IP the same way /text handler does (take first from comma-separated proxy chain)
+  const normalizedIp = clientIp?.includes(',') ? clientIp.split(',')[0].trim() : clientIp;
+
+  let user = storage.connectedUsers.find(u => u.sessionId === sessionId);
+  if (!user) {
+    user = storage.connectedUsers.find(u => u.ip === normalizedIp);
+  }
+  if (user) {
+    user.listening = listening;
+  } else if (listening) {
+    // User entry may not exist yet (e.g. server restart, audio reconnects before /text).
+    // Retry once after handleConnect has had time to complete.
+    setTimeout(() => {
+      let retryUser = storage.connectedUsers.find(u => u.sessionId === sessionId);
+      if (!retryUser) {
+        retryUser = storage.connectedUsers.find(u => u.ip === normalizedIp);
+      }
+      if (retryUser) {
+        retryUser.listening = listening;
+        dataHandler.showOnlineUsers();
+      }
+    }, 3000);
+  }
 }
 
 function formatUptime(uptimeInSeconds) {
@@ -345,5 +388,5 @@ const escapeHtml = (unsafe) => {
 
 
 module.exports = {
-  authenticateWithXdrd, parseMarkdown, handleConnect, removeMarkdown, formatUptime, resolveDataBuffer, kickClient, checkIPv6Support, checkLatency, antispamProtection, escapeHtml
+  authenticateWithXdrd, parseMarkdown, handleConnect, removeMarkdown, formatUptime, resolveDataBuffer, kickClient, checkIPv6Support, checkLatency, antispamProtection, escapeHtml, setListeningStatus
 }

@@ -423,7 +423,9 @@ function handleWebSocketMessage(event) {
     }
     
     parsedData = JSON.parse(event.data);
-    
+
+    if (parsedData.sessionId) return;
+
     resetDataTimeout();
     updatePanels(parsedData);
     

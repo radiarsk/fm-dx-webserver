@@ -16,6 +16,13 @@ const { logInfo, logDebug, logWarn, logError, logFfmpeg, logs } = require('./con
 const dataHandler = require('./datahandler');
 const fmdxList = require('./fmdx_list');
 const { allPluginConfigs } = require('./plugins');
+const pluginsApi = require('./plugins_api');
+
+// Dynamic auth hook — plugins can register an HTTP auth middleware
+router.use((req, res, next) => {
+    const hook = pluginsApi.getHttpAuthHook();
+    hook ? hook(req, res, next) : next();
+});
 
 // Endpoints
 router.get('/', (req, res) => {

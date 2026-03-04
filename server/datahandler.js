@@ -483,9 +483,13 @@ async function checkSerialPortStatus() {
 }
 checkSerialPortStatus();
 
-function showOnlineUsers(currentUsers) {
-  dataToSend.users = currentUsers;
-  initialData.users = currentUsers;
+function showOnlineUsers(currentUsers, wss) {
+    const storage = require('./storage');
+    const pluginsApi = require('./plugins_api');
+    const connectedUserList = storage.getConnectedUserList();
+    dataToSend.users = connectedUserList.length;
+    initialData.users = connectedUserList.length;
+    pluginsApi.emitPluginEvent('usersChanged', connectedUserList);
 }
 
 let prevFreq = initialData.freq || '87.500';

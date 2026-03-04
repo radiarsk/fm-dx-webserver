@@ -93,11 +93,15 @@ var _3LAS = /** @class */ (function () {
         if (this.WakeLock)
             this.WakeLock.Begin();
         try {
-            if (window.location.protocol === 'https:') { 
-                this.WebSocket = new WebSocketClient(this.Logger, 'wss://' + this.Settings.SocketHost + ':' + this.Settings.SocketPort.toString() + window.location.pathname + 'audio' , this.OnSocketError.bind(this), this.OnSocketConnect.bind(this), this.OnSocketDataReady.bind(this), this.OnSocketDisconnect.bind(this));
+            var audioPath = window.location.pathname + 'audio';
+            if (window.sessionId) {
+                audioPath += '?sessionId=' + encodeURIComponent(window.sessionId);
+            }
+            if (window.location.protocol === 'https:') {
+                this.WebSocket = new WebSocketClient(this.Logger, 'wss://' + this.Settings.SocketHost + ':' + this.Settings.SocketPort.toString() + audioPath , this.OnSocketError.bind(this), this.OnSocketConnect.bind(this), this.OnSocketDataReady.bind(this), this.OnSocketDisconnect.bind(this));
             }
             else {
-                this.WebSocket = new WebSocketClient(this.Logger, 'ws://' + this.Settings.SocketHost + ':' + this.Settings.SocketPort.toString() + window.location.pathname + 'audio' , this.OnSocketError.bind(this), this.OnSocketConnect.bind(this), this.OnSocketDataReady.bind(this), this.OnSocketDisconnect.bind(this));
+                this.WebSocket = new WebSocketClient(this.Logger, 'ws://' + this.Settings.SocketHost + ':' + this.Settings.SocketPort.toString() + audioPath , this.OnSocketError.bind(this), this.OnSocketConnect.bind(this), this.OnSocketDataReady.bind(this), this.OnSocketDisconnect.bind(this));
             }
             this.Logger.Log("Init of WebSocketClient succeeded");
             this.Logger.Log("Trying to connect to server.");

@@ -61,7 +61,10 @@ function sendKeepalive() {
 }
 
 function sendUpdate() {
-  let currentOs = os.type() + ' ' + os.release();
+  // RADIARPATCH - start
+  // let currentOs = os.type() + ' ' + os.release();
+  let currentOs = 'Linux';
+  // RADIARPATCH - end
 
   let bwLimit = '';
   if (serverConfig.webserver.tuningLimit === true) {
